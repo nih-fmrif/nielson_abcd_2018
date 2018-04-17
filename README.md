@@ -2,6 +2,15 @@
 
 This will eventually be the repo for code related to our combat paper. In the mean time, it's just the code for the simulations.
 
+To run the notebooks (using docker) clone this repository and cd into it on the command line then type the following with the appropriate absolute path to your data directory:
+
+```
+docker run -it -v [data_dir_absolute_path]:/data -v $PWD:/mnt --user root -e NB_GID=`id -u` -e NB_UID=`id -u` --rm -p 8888:8888 nihfmrifcircleci/abcd_combo start.sh jupyter lab
+```
+
+Now just paste the url listed in your terminal into your browser. You will only have access to the directory from which you ran the docker command and your data directory (located at /data).
+
+### Deprecated:
 Here's the commands to create a conda env:
 
 ```

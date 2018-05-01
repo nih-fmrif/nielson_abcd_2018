@@ -1,6 +1,9 @@
-# nielson_abcd_2018
+# Detecting and harmonizing scanner differences in the ABCD study - annual release 1.0
 
-This will eventually be the repo for code related to our combat paper. In the mean time, it's just the code for the simulations.
+The code here is not 100% cleaned up and generally runnable, but this is the code that we used for analyses figure generation for Detecting and harmonizing scanner differences in the ABCD study - annual release 1.0. We are running lots of permutations and the code here reflects writing those pemutations out to swarm files for use on the [NIH HPC](https://hpc.nih.gov/). If you're in another cluster computing environment, you may have to make change accordingly. 
+
+#### Getting the data
+In order to reproduce these analyses, you'll need to get the data from the [NIMH Data Archive](https://data-archive.nimh.nih.gov/). For this paper we are using [ABCD annual release 1.0](https://data-archive.nimh.nih.gov/abcd/query/annual-release-1.0.html), DOI 10.15154/1412097.  
 
 #### Rerunning the analysis with docker
 To run the notebooks (using docker) clone this repository and cd into it on the command line then type the following with the appropriate absolute path to your data directory:

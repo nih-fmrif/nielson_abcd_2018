@@ -2,6 +2,7 @@
 
 This will eventually be the repo for code related to our combat paper. In the mean time, it's just the code for the simulations.
 
+#### Rerunning the analysis with docker
 To run the notebooks (using docker) clone this repository and cd into it on the command line then type the following with the appropriate absolute path to your data directory:
 
 ```
@@ -10,8 +11,37 @@ docker run -it -v [data_dir_absolute_path]:/data -v $PWD:/mnt --user root -e NB_
 
 Now just paste the url listed in your terminal into your browser. You will only have access to the directory from which you ran the docker command and your data directory (located at /data).
 
+
+#### Rerunning the analysis with singularity
+
+Running the analysis using singularity is similar. To run a notebook server in a singularity container:
+
+```
+singularity exec -B [data_dir_absolute_path]:/data -B $PWD:/mnt -H ~/temp_for_singularity [path_to_singularity_image] start.sh jupyter lab --port=10104 --no-browser
+```
+
+One can create a singularity image in two ways. The first directly converts the docker image above into a singularity image. The advantage of this method is that it can be performed on the fly on a hpc environment. The second method must be performed on a machine with docker installed (this will not be possible within a high performance computing environment). The advantage of this latter method is that all data volumes of the host operating system can be mounted to the container.
+
+1. On a host with singularity (no admin privileges) required:
+
+```
+singularity pull docker://nihfmrif/abcd_combo:bioarchive_submission_env
+```
+
+2. On a host with docker installed with the appropriate HPC directories listed after the "-m" flag so that they are added during the conversion process:
+
+```
+docker run -v /var/run/docker.sock:/var/run/docker.sock -v /data/rodgersleejg/general_singularity_images:/output --privileged -t --rm singularityware/docker2singularity -m "/gpfs /gs2 /gs3 /gs4 /gs5 /gs6 /gs7 /gs8 /gs9 /gs10 /gs11 /spin1 /data /scratch /fdb /lscratch"
+```
+
+To conveniently mount the directories in the step above one can use the SINGULARITY_BINDPATH variable. For example in bash on a slurm cluster:
+
+```
+export SINGULARITY_BINDPATH="/gs3,/gs4,/gs5,/gs6,/gs7,/gs8,/gs9,/gs10,/gs11,/spin1,/scratch,/fdb,/lscratch/$SLURM_JOB_ID:/tmp,/data"
+```
+
 ### Deprecated:
-Here's the commands to create a conda env:
+Here's the commands to create a conda environment:
 
 ```
 conda config --append channels bioconda

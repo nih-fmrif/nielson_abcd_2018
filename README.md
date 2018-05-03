@@ -1,5 +1,7 @@
 # Detecting and harmonizing scanner differences in the ABCD study - annual release 1.0
 
+#### BioArXiv Preprint: [https://doi.org/10.1101/309260](http://dx.doi.org/10.1101/309260)
+
 The code here is not 100% cleaned up and generally runnable, but this is the code that we used for analyses figure generation for Detecting and harmonizing scanner differences in the ABCD study - annual release 1.0. We are running lots of permutations and the code here reflects writing those pemutations out to swarm files for use on the [NIH HPC](https://hpc.nih.gov/). If you're in another cluster computing environment, you may have to make change accordingly. 
 
 #### Getting the data

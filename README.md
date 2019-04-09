@@ -1,9 +1,21 @@
 # Detecting and harmonizing scanner differences in the ABCD study - annual release 1.0
 
+#### BioArXiv Preprint: [https://doi.org/10.1101/309260](http://dx.doi.org/10.1101/309260)
+
 The code here is not 100% cleaned up and generally runnable, but this is the code that we used for analyses figure generation for Detecting and harmonizing scanner differences in the ABCD study - annual release 1.0. We are running lots of permutations and the code here reflects writing those pemutations out to swarm files for use on the [NIH HPC](https://hpc.nih.gov/). If you're in another cluster computing environment, you may have to make change accordingly. 
 
 #### Getting the data
 In order to reproduce these analyses, you'll need to get the data from the [NIMH Data Archive](https://data-archive.nimh.nih.gov/). For this paper we are using [ABCD annual release 1.0](https://data-archive.nimh.nih.gov/abcd/query/annual-release-1.0.html), DOI 10.15154/1412097.  
+
+#### Using these notebooks
+
+These notebooks will take you through the analyses we ran. The order in which they should be run is:
+1) prepare_abcd_data.ipynb
+2) prep_run_swarm.ipynb
+3) proc_perm_results_con.ipynb
+4) proc_perm_results_task_based.ipynb
+
+In between 2 and 3, you'll need to run the permutations, either on swarm, or some other way.
 
 #### Rerunning the analysis with docker
 To run the notebooks (using docker) clone this repository and cd into it on the command line then type the following with the appropriate absolute path to your data directory:

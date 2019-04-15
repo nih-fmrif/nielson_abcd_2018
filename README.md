@@ -1,4 +1,4 @@
-# Detecting and harmonizing scanner differences in the ABCD study - annual release 1.0
+# Detecting and harmonizing scanner differences in the ABCD study - annual release 2.0
 
 #### BioArXiv Preprint: [https://doi.org/10.1101/309260](http://dx.doi.org/10.1101/309260)
 

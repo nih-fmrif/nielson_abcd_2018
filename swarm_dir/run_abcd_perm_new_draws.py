@@ -504,11 +504,11 @@ def run_variance_metric_perm(pn, perm, metric, df):
     df['perm_metric'] = df.copy().loc[perm,metric].values
     res = VarPermRes(pn,
                   metric,
-                  smf.ols('perm_metric ~ 1 ', data = df).fit().rsquared_adj,
-                  smf.ols('perm_metric ~ interview_age + gender + ehi_y_ss_scoreb ', data = df).fit().rsquared_adj,
-                  smf.ols('perm_metric ~ interview_age + gender + ehi_y_ss_scoreb + scanner_manufacturer_pd', data = df).fit().rsquared_adj,
-                  smf.ols('perm_metric ~ interview_age + gender + ehi_y_ss_scoreb + scanner_manufacturer_pd + scanner_type_pd', data = df).fit().rsquared_adj,
-                  smf.ols('perm_metric ~ interview_age + gender + ehi_y_ss_scoreb + scanner_manufacturer_pd + scanner_type_pd + deviceserialnumber', data = df).fit().rsquared_adj)
+                  smf.ols('perm_metric ~ 1 ', data = df).fit().rsquared,
+                  smf.ols('perm_metric ~ interview_age + gender + ehi_y_ss_scoreb ', data = df).fit().rsquared,
+                  smf.ols('perm_metric ~ interview_age + gender + ehi_y_ss_scoreb + scanner_manufacturer_pd', data = df).fit().rsquared,
+                  smf.ols('perm_metric ~ interview_age + gender + ehi_y_ss_scoreb + scanner_manufacturer_pd + scanner_type_pd', data = df).fit().rsquared,
+                  smf.ols('perm_metric ~ interview_age + gender + ehi_y_ss_scoreb + scanner_manufacturer_pd + scanner_type_pd + deviceserialnumber', data = df).fit().rsquared)
     return res
 
 def run_variance_perm(pn, perm, df, metrics):

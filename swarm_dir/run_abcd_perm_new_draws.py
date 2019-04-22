@@ -305,24 +305,26 @@ robjects.r('''modifiedComBat <- function (dat, batch, mod = NULL, par.prior = FA
 ''')
 combat = robjects.r('modifiedComBat')
 
-def run_combat(feats, meta, model="~interview_age + gender + ehi_y_ss_scoreb",
+
+def run_combat(feats, meta, model="~interview_age + gender + ehi_ss_score",
               feats_test=None, meta_test=None, model_test=None):
     model_matrix = patsy.dmatrix(model, meta)
     fmat = np.array(feats).T
-    rbatch = robjects.IntVector(pd.Categorical(meta.deviceserialnumber).codes)
+    rbatch = robjects.IntVector(pd.Categorical(meta.unique_scanner).codes)
     
     if (meta_test is not None) and (feats_test is not None):
         if model_test is None:
             model_test = model
         model_matrix_test = patsy.dmatrix(model_test, meta_test)
         fmat_test = np.array(feats_test).T
-        rbatch_test = robjects.IntVector(pd.Categorical(meta_test.deviceserialnumber).codes)
+        rbatch_test = robjects.IntVector(pd.Categorical(meta_test.unique_scanner).codes)
         combat_result = combat(dat=fmat, batch=rbatch, mod=model_matrix,
                                dat2=fmat_test, batch2=rbatch_test, mod2=model_matrix_test)
     else:
         combat_result = combat(dat = fmat, batch = rbatch, mod = model_matrix)
     combat_result = [np.array(cr) for cr in combat_result]
     return combat_result
+
 
 def bal_samp(df, strata, balance, order, keys, n_splits=5, n_draws=100):
     """Balanced sampling across strata
@@ -412,8 +414,10 @@ def bal_samp(df, strata, balance, order, keys, n_splits=5, n_draws=100):
                                  + len(order))
     return draws_df
 
+
 ModPermRes = namedtuple("ModPermRes",['pn','fn','name', 'clf', 'ho_score','cfn'])
 VarPermRes = namedtuple("VarPermRes", ["pn", "metric", "int_r2", "agh_r2", "aghs_r2", "aghss_r2", "aghsss_r2"])
+
 
 def fit_model(X_r, Y_r, X_e, Y_e, pn, fn, name, mapper):
     clf = Pipeline([('preprocessing', mapper),
@@ -432,6 +436,7 @@ def fit_model(X_r, Y_r, X_e, Y_e, pn, fn, name, mapper):
                      confusion_matrix(Y_e, clf.predict(X_e)))
     return res
 
+
 def get_splits(draws_df, n_draws=None, dn=None):
     cv_splits = []
     if dn is None and n_draws is None:
@@ -446,6 +451,7 @@ def get_splits(draws_df, n_draws=None, dn=None):
                 tmp_df = draws_df.loc[pd.notnull(draws_df['draw_%d'%dn]), 'draw_%d'%dn]
                 cv_splits.append((tmp_df[(tmp_df != fn)].index.values, tmp_df[tmp_df == fn].index.values))
     return cv_splits
+
 
 def per_fold(X_r, Y_r, X_e, Y_e, pn, fn, name, metric_cols):
     """Per fold function that unwraps the inner loop
@@ -477,7 +483,7 @@ def per_fold(X_r, Y_r, X_e, Y_e, pn, fn, name, metric_cols):
             rt = ResidTransform(X_r_rsd.interview_age.values.reshape((-1,1)))
             X_r_rsd.loc[:,col] = rt.fit_transform(X_r_rsd.loc[:,col].values)
             X_e_rsd.loc[:,col] = rt.transform(X_e_rsd.loc[:,col].values, X_e_rsd.interview_age.values.reshape((-1,1)))
-        cb_meta_cols = ['deviceserialnumber', 'interview_age', 'gender', 'ehi_y_ss_scoreb']
+        cb_meta_cols = ['unique_scanner', 'interview_age', 'gender', 'ehi_ss_score']
         X_r_cb = X_r_rsd
         X_e_cb = X_e_rsd
         # Fit combat seperately on training and test splits
@@ -490,7 +496,7 @@ def per_fold(X_r, Y_r, X_e, Y_e, pn, fn, name, metric_cols):
     # Learn combat on training, apply to test, fit on x_r_cb, score on x_e_cb
     elif 'combat' in name:
         print("combat", name)
-        cb_meta_cols = ['deviceserialnumber', 'interview_age', 'gender', 'ehi_y_ss_scoreb']
+        cb_meta_cols = ['unique_scanner', 'interview_age', 'gender', 'ehi_ss_score']
         X_r_cb = X_r.copy(deep=True)
         X_e_cb = X_e.copy(deep=True)
         combat_res_r = run_combat(X_r_cb.loc[:, metric_cols], X_r_cb.loc[:, cb_meta_cols])
@@ -498,21 +504,24 @@ def per_fold(X_r, Y_r, X_e, Y_e, pn, fn, name, metric_cols):
         combat_res_e = run_combat(X_e_cb.loc[:, metric_cols], X_e_cb.loc[:, cb_meta_cols])
         X_e_cb.loc[:, metric_cols] = combat_res_e[0].T
         return (fit_model(X_r_cb, Y_r, X_e_cb, Y_e, pn, fn, name, mapper))
-    
+
+
 def run_variance_metric_perm(pn, perm, metric, df):
     # Don't forget to z-score df before this step
     df['perm_metric'] = df.copy().loc[perm,metric].values
     res = VarPermRes(pn,
                   metric,
                   smf.ols('perm_metric ~ 1 ', data = df).fit().rsquared,
-                  smf.ols('perm_metric ~ interview_age + gender + ehi_y_ss_scoreb ', data = df).fit().rsquared,
-                  smf.ols('perm_metric ~ interview_age + gender + ehi_y_ss_scoreb + scanner_manufacturer_pd', data = df).fit().rsquared,
-                  smf.ols('perm_metric ~ interview_age + gender + ehi_y_ss_scoreb + scanner_manufacturer_pd + scanner_type_pd', data = df).fit().rsquared,
-                  smf.ols('perm_metric ~ interview_age + gender + ehi_y_ss_scoreb + scanner_manufacturer_pd + scanner_type_pd + deviceserialnumber', data = df).fit().rsquared)
+                  smf.ols('perm_metric ~ interview_age + gender + ehi_ss_score ', data = df).fit().rsquared,
+                  smf.ols('perm_metric ~ interview_age + gender + ehi_ss_score + scanner_manufacturer_pd', data = df).fit().rsquared,
+                  smf.ols('perm_metric ~ interview_age + gender + ehi_ss_score + scanner_manufacturer_pd + scanner_type_pd', data = df).fit().rsquared,
+                  smf.ols('perm_metric ~ interview_age + gender + ehi_ss_score + scanner_manufacturer_pd + scanner_type_pd + unique_scanner', data = df).fit().rsquared)
     return res
+
 
 def run_variance_perm(pn, perm, df, metrics):
     return [run_variance_metric_perm(pn, perm, metric, df) for metric in metrics]
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process some integers.')
@@ -551,13 +560,35 @@ if __name__ == "__main__":
     dn = args.dn
 
     # Pick out meta columns and metric columns
-    base_meta_cols = ['contrast', 'fmri_beta_gparc_numtrs', 'fmri_beta_gparc_tr', 'lmt_run', 
+    base_meta_cols = ['contrast', 'fmri_beta_gparc_numtrs', 'fmri_beta_gparc_tr', 'lmt_run',
                       'mid_beta_seg_dof', 'task', 'collection_id', 'dataset_id', 'subjectkey',
                       'src_subject_id', 'interview_date', 'interview_age',
                       'gender', 'event_name', 'visit', 'rsfm_tr', 'eventname',
                       'rsfm_nreps', 'rsfm_numtrs', 'pipeline_version',  'scanner_manufacturer_pd',
-                      'scanner_type_pd','deviceserialnumber', 'magnetic_field_strength',
-                      'procdate', 'collection_title', 'promoted_subjectkey', 'study_cohort_name','ehi_y_ss_scoreb', '_merge', 'qc_ok', 'age_3mos', 'index']
+                      'scanner_type_pd', 'mri_info_deviceserialnumber', 'magnetic_field_strength',
+                      'procdate', 'collection_title', 'promoted_subjectkey', 'study_cohort_name',
+                      'ehi_ss_score', '_merge', 'qc_ok', 'age_3mos', 'abcd_betnet02_id', 'fsqc_qc',
+                      'rsfmri_cor_network.gordon_visitid',
+                      'mrirscor02_id',  'site_id_l', 'mri_info_manufacturer',
+                      'mri_info_manufacturersmn', 'mri_info_deviceserialnumber',
+                      'mri_info_magneticfieldstrength', 'mri_info_softwareversion',
+                      'unique_scanner', 'tbl_id', 'tbl_visitid', 
+                     'modality', 'metric', 'source_file', 'tbl_id_y', 'source_file_y', 
+                     'run', 'mri_info_visitid', 'dmri_dti_postqc_qc',
+       'iqc_t2_ok_ser', 'iqc_mid_ok_ser', 'iqc_sst_ok_ser',
+       'iqc_nback_ok_ser', 'tfmri_mid_beh_perform.flag',
+       'tfmri_nback_beh_perform.flag', 'tfmri_sst_beh_perform.flag',
+       'tfmri_mid_all_beta_dof', 'tfmri_mid_all_sem_dof',
+       'tfmri_sst_all_beta_dof', 'tfmri_sst_all_sem_dof',
+       'tfmri_nback_all_beta_dof', 'tfmri_nback_all_sem_dof',
+       'mrif_score', 'mrif_hydrocephalus', 'mrif_herniation',
+       'mr_findings_ok', 'tbl_numtrs', 'tbl_dof', 'tbl_nvols', 'tbl_tr', 'tbl_subthresh.nvols',
+                     'rsfmri_cor_network.gordon_tr', 'rsfmri_cor_network.gordon_numtrs',
+       'rsfmri_cor_network.gordon_nvols',
+       'rsfmri_cor_network.gordon_subthresh.nvols',
+       'rsfmri_cor_network.gordon_subthresh.contig.nvols',
+       'rsfmri_cor_network.gordon_ntpoints', 'dataset_id_y', 'tbl_mean.motion', 'tbl_mean.trans', 'tbl_mean.rot',
+       'tbl_max.motion', 'tbl_max.trans', 'tbl_max.rot']
     meta_cols = raw_df.columns[raw_df.columns.isin(base_meta_cols)].values
     metric_cols = raw_df.columns[~raw_df.columns.isin(base_meta_cols)].values
     
@@ -577,31 +608,31 @@ if __name__ == "__main__":
     #var_res = run_variance_perm(pn, perms[pn], raw_df, metric_cols)
     
     # set up perm
-    raw_df.loc[:, 'deviceserialnumber'] = raw_df.loc[perms[pn], 'deviceserialnumber'].values
-    
+    raw_df.loc[:, 'unique_scanner'] = raw_df.loc[perms[pn], 'unique_scanner'].values
+
     # draw samples
-    strata = ['deviceserialnumber']
-    balance = ['gender', 'ehi_y_ss_scoreb']
+    strata = ['unique_scanner']
+    balance = ['gender', 'ehi_ss_score']
     order = ['interview_age']
     keys = ['subjectkey', 'interview_date']
     n_splits = 3
     ab_n_splits = 2
     draws_df = bal_samp(raw_df, strata, balance, order, keys, n_splits=n_splits, n_draws=n_draws)
-    
-    strata = ['deviceserialnumber']
-    balance = ['gender', 'ehi_y_ss_scoreb','age_3mos']
+
+    strata = ['unique_scanner']
+    balance = ['gender', 'ehi_ss_score','age_3mos']
     order = ['interview_age']
     keys = ['subjectkey', 'interview_date']
     df_ab = raw_df.copy(deep=True)
     df_ab['age_3mos'] = (df_ab['interview_age'] // 3) * 3
-    
+
     count_by_level = df_ab.groupby(strata+balance)[['subjectkey']].nunique().reset_index()
-    levels_counts = count_by_level[count_by_level.subjectkey >= ab_n_splits].groupby(balance)[strata].nunique().reset_index().rename(columns={'deviceserialnumber':'sufficient_sites'})
+    levels_counts = count_by_level[count_by_level.subjectkey >= ab_n_splits].groupby(balance)[strata].nunique().reset_index().rename(columns={'unique_scanner':'sufficient_sites'})
     levels_counts.loc[levels_counts.sufficient_sites == levels_counts.sufficient_sites.max()]
-    df_ab = df_ab.reset_index().merge(levels_counts, how='left', on=['gender','ehi_y_ss_scoreb', 'age_3mos']).set_index('index')
+    df_ab = df_ab.reset_index().merge(levels_counts, how='left', on=['gender','ehi_ss_score', 'age_3mos']).set_index('index')
     df_ab = df_ab.loc[df_ab.sufficient_sites == df_ab.sufficient_sites.max(),:]
     ab_draws_df = bal_samp(df_ab, strata, balance, order, keys, n_splits=ab_n_splits, n_draws=n_draws)
-    
+
     # Create cv folds for gender age balance
     cv_splits = get_splits(draws_df, n_draws=n_draws, dn=dn)
     
@@ -626,7 +657,7 @@ if __name__ == "__main__":
     
     if (dn == 0) or (n_draws is not None):
         # Combat for Variance
-        combat_res = run_combat(raw_df.loc[:,metric_cols], raw_df.loc[:, ['interview_age', 'gender', 'ehi_y_ss_scoreb', 'deviceserialnumber']])
+        combat_res = run_combat(raw_df.loc[:,metric_cols], raw_df.loc[:, ['interview_age', 'gender', 'ehi_ss_score', 'unique_scanner']])
         cb_df = raw_df.copy(deep=True)
         cb_df.loc[:, metric_cols] = combat_res[0].T
         try:

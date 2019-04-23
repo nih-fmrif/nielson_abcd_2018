@@ -512,10 +512,10 @@ def run_variance_metric_perm(pn, perm, metric, df):
     res = VarPermRes(pn,
                   metric,
                   smf.ols('perm_metric ~ 1 ', data = df).fit().rsquared,
-                  smf.ols('perm_metric ~ interview_age + gender + ehi_ss_score ', data = df).fit().rsquared,
-                  smf.ols('perm_metric ~ interview_age + gender + ehi_ss_score + scanner_manufacturer_pd', data = df).fit().rsquared,
-                  smf.ols('perm_metric ~ interview_age + gender + ehi_ss_score + scanner_manufacturer_pd + scanner_type_pd', data = df).fit().rsquared,
-                  smf.ols('perm_metric ~ interview_age + gender + ehi_ss_score + scanner_manufacturer_pd + scanner_type_pd + unique_scanner', data = df).fit().rsquared)
+                  smf.ols('perm_metric ~ 1 + interview_age + gender', data = df).fit().rsquared,
+                  smf.ols('perm_metric ~ 1 + interview_age + gender + mri_info_manufacturer', data = df).fit().rsquared,
+                  smf.ols('perm_metric ~ 1 + interview_age + gender + mri_info_manufacturer + mri_info_manufacturersmn', data = df).fit().rsquared,
+                  smf.ols('perm_metric ~ 1 + interview_age + gender + mri_info_manufacturer + mri_info_manufacturersmn + unique_scanner', data = df).fit().rsquared)
     return res
 
 
@@ -525,8 +525,8 @@ def run_variance_perm(pn, perm, df, metrics):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process some integers.')
-    parser.add_argument('pn', type=int, help="Integer specifying which permutation to run")
-    parser.add_argument('perm_path', type=str, help="Path to pickle specifying permuted indices")
+    parser.add_argument('pn', type=int, help="Integer specifying which permutation or bootstrap to run")
+    parser.add_argument('perm_path', type=str, help="Path to pickle specifying permuted or bootstrap indices")
     parser.add_argument('ymapper_path', type=str, help="Path to pickled ymapper")
     parser.add_argument('raw_df_path', type=str, help="Path to pickled raw dataframe")
     #parser.add_argument('draws_df_path', type=str, help="Path to pickled draw dataframe")
@@ -536,6 +536,7 @@ if __name__ == "__main__":
     parser.add_argument('--n_draws', type=int, action='store')
     parser.add_argument('--dn', type=int, action='store')
     parser.add_argument('--do_ab', action='store_true')
+    parser.add_argument('--bootstrap', action='store_true', help="Is this a bootstrap or a permutation")
     #parser.add_argument('--ab_draws_df_path', type=str, action='store',
     #                    help="Path to pickled draw dataframe for age balanced data, optional, if not present, age balanced analysis isn't run.")
 
@@ -558,6 +559,7 @@ if __name__ == "__main__":
     n_jobs = args.n_jobs
     n_draws = args.n_draws
     dn = args.dn
+    bootstrap = args.bootstrap
 
     # Pick out meta columns and metric columns
     base_meta_cols = ['contrast', 'fmri_beta_gparc_numtrs', 'fmri_beta_gparc_tr', 'lmt_run',
@@ -567,105 +569,184 @@ if __name__ == "__main__":
                       'rsfm_nreps', 'rsfm_numtrs', 'pipeline_version',  'scanner_manufacturer_pd',
                       'scanner_type_pd', 'mri_info_deviceserialnumber', 'magnetic_field_strength',
                       'procdate', 'collection_title', 'promoted_subjectkey', 'study_cohort_name',
-                      'ehi_ss_score', '_merge', 'qc_ok', 'age_3mos', 'abcd_betnet02_id', 'fsqc_qc',
+                      'ehi_ss_score', '_merge', 'qc_ok', 'age_3mos', 'age_6mos', 
+                      'abcd_betnet02_id', 'fsqc_qc',
                       'rsfmri_cor_network.gordon_visitid',
                       'mrirscor02_id',  'site_id_l', 'mri_info_manufacturer',
                       'mri_info_manufacturersmn', 'mri_info_deviceserialnumber',
                       'mri_info_magneticfieldstrength', 'mri_info_softwareversion',
                       'unique_scanner', 'tbl_id', 'tbl_visitid', 
-                     'modality', 'metric', 'source_file', 'tbl_id_y', 'source_file_y', 
-                     'run', 'mri_info_visitid', 'dmri_dti_postqc_qc',
-       'iqc_t2_ok_ser', 'iqc_mid_ok_ser', 'iqc_sst_ok_ser',
-       'iqc_nback_ok_ser', 'tfmri_mid_beh_perform.flag',
-       'tfmri_nback_beh_perform.flag', 'tfmri_sst_beh_perform.flag',
-       'tfmri_mid_all_beta_dof', 'tfmri_mid_all_sem_dof',
-       'tfmri_sst_all_beta_dof', 'tfmri_sst_all_sem_dof',
-       'tfmri_nback_all_beta_dof', 'tfmri_nback_all_sem_dof',
-       'mrif_score', 'mrif_hydrocephalus', 'mrif_herniation',
-       'mr_findings_ok', 'tbl_numtrs', 'tbl_dof', 'tbl_nvols', 'tbl_tr', 'tbl_subthresh.nvols',
-                     'rsfmri_cor_network.gordon_tr', 'rsfmri_cor_network.gordon_numtrs',
-       'rsfmri_cor_network.gordon_nvols',
-       'rsfmri_cor_network.gordon_subthresh.nvols',
-       'rsfmri_cor_network.gordon_subthresh.contig.nvols',
-       'rsfmri_cor_network.gordon_ntpoints', 'dataset_id_y', 'tbl_mean.motion', 'tbl_mean.trans', 'tbl_mean.rot',
-       'tbl_max.motion', 'tbl_max.trans', 'tbl_max.rot']
+                      'modality', 'metric', 'source_file', 'tbl_id_y', 'source_file_y', 
+                      'run', 'mri_info_visitid', 'dmri_dti_postqc_qc',
+                      'iqc_t2_ok_ser', 'iqc_mid_ok_ser', 'iqc_sst_ok_ser',
+                      'iqc_nback_ok_ser', 'tfmri_mid_beh_perform.flag',
+                      'tfmri_nback_beh_perform.flag', 'tfmri_sst_beh_perform.flag',
+                      'tfmri_mid_all_beta_dof', 'tfmri_mid_all_sem_dof',
+                      'tfmri_sst_all_beta_dof', 'tfmri_sst_all_sem_dof',
+                      'tfmri_nback_all_beta_dof', 'tfmri_nback_all_sem_dof',
+                      'mrif_score', 'mrif_hydrocephalus', 'mrif_herniation',
+                      'mr_findings_ok', 'tbl_numtrs', 'tbl_dof', 'tbl_nvols', 'tbl_tr', 'tbl_subthresh.nvols',
+                      'rsfmri_cor_network.gordon_tr', 'rsfmri_cor_network.gordon_numtrs',
+                      'rsfmri_cor_network.gordon_nvols',
+                      'rsfmri_cor_network.gordon_subthresh.nvols',
+                      'rsfmri_cor_network.gordon_subthresh.contig.nvols',
+                      'rsfmri_cor_network.gordon_ntpoints', 'dataset_id_y',
+                      'tbl_mean.motion', 'tbl_mean.trans', 'tbl_mean.rot',
+                      'tbl_max.motion', 'tbl_max.trans', 'tbl_max.rot',
+                      'rsfmri_cor_network.gordon_mean.motion',
+                      'rsfmri_cor_network.gordon_max.motion',
+                      'rsfmri_cor_network.gordon_mean.trans',
+                      'rsfmri_cor_network.gordon_max.trans',
+                      'rsfmri_cor_network.gordon_mean.rot',
+                      'rsfmri_cor_network.gordon_max.rot',]
     meta_cols = raw_df.columns[raw_df.columns.isin(base_meta_cols)].values
     metric_cols = raw_df.columns[~raw_df.columns.isin(base_meta_cols)].values
     
     mapper = DataFrameMapper([([nv],preprocessing.StandardScaler()) for nv in metric_cols])
     
+    if bootstrap:
+        bs_df = raw_df.loc[perms[pn], :].reset_index(drop=True)
+        nobs_df = raw_df.loc[(~raw_df.subjectkey.isin(bs_df.subjectkey.unique())), :].reset_index(drop=True)
+        
     if (dn == 0) or (n_draws is not None):
         # Norm columns for variance estimation
         variance_mapper = DataFrameMapper([([nv],preprocessing.StandardScaler()) for nv in (list(metric_cols) + ['interview_age'])])
-        var_df = raw_df.copy(deep=True)
+        if bootstrap:
+              var_df = bs_df.copy(deep=True)
+        else:
+            var_df = raw_df.copy(deep=True)
         var_df.loc[:, list(metric_cols) + ['interview_age']] = variance_mapper.fit_transform(raw_df)
 
         print("Estimate variance contributions for each metric", flush=True)
-        var_res = joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(run_variance_metric_perm)(pn, perms[pn], metric, var_df) for metric in metric_cols)
+        if bootstrap:
+            var_res = joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(run_variance_metric_perm)(pn, var_df.index.values, metric, var_df) for metric in metric_cols)
+        else:
+            var_res = joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(run_variance_metric_perm)(pn, perms[pn], metric, var_df) for metric in metric_cols)
     else:
         var_res = None
 
-    #var_res = run_variance_perm(pn, perms[pn], raw_df, metric_cols)
-    
-    # set up perm
-    raw_df.loc[:, 'unique_scanner'] = raw_df.loc[perms[pn], 'unique_scanner'].values
+    if bootstrap:
+        # draw samples
+        strata = ['unique_scanner']
+        balance = ['gender', 'ehi_ss_score']
+        order = ['interview_age']
+        keys = ['subjectkey', 'interview_date']
+        n_splits = 1
+        ab_n_splits = 1
+        draws_df = bal_samp(bs_df, strata, balance, order, keys, n_splits=n_splits, n_draws=n_draws)
+        draw_ind = draws_df.draw_0[draws_df.draw_0.notnull()].index.values
+        draws_df_nobs = bal_samp(nobs_df, strata, balance, order, keys, n_splits=n_splits, n_draws=n_draws)
+        draw_ind_nobs = draws_df_nobs.draw_0[draws_df_nobs.draw_0.notnull()].index.values
+        
+        run_params = [
+                      (bs_df.loc[draw_ind, :],
+                      ymapper.transform(bs_df.loc[draw_ind, :]).ravel(),
+                      nobs_df.loc[draw_ind_nobs, :],
+                      ymapper.transform(nobs_df.loc[draw_ind_nobs, :]).ravel(),
+                      pn, 0, name, metric_cols) for name in ['normal', 'age_rsd', 'cbagersd', 'combat']]
+        
+        if do_ab:
+            strata = ['unique_scanner']
+            balance = ['gender', 'ehi_ss_score','age_6mos']
+            order = ['interview_age']
+            keys = ['subjectkey', 'interview_date']
+            df_ab = bs_df.copy(deep=True)
+            df_ab['age_6mos'] = (df_ab['interview_age'] // 6) * 6
+            
+            count_by_level = df_ab.groupby(strata+balance)[['subjectkey']].nunique().reset_index()
+            levels_counts = count_by_level[count_by_level.subjectkey >= ab_n_splits].groupby(balance)[strata].nunique().reset_index().rename(columns={'unique_scanner':'sufficient_sites'})
+            levels_counts.loc[levels_counts.sufficient_sites == levels_counts.sufficient_sites.max()]
+            df_ab = df_ab.reset_index().merge(levels_counts, how='left', on=['gender','ehi_ss_score', 'age_6mos']).set_index('index')
+            df_ab = df_ab.loc[df_ab.sufficient_sites == df_ab.sufficient_sites.max(),:]
+            ab_draws_df = bal_samp(df_ab, strata, balance, order, keys, n_splits=ab_n_splits, n_draws=n_draws)
+            ab_draw_ind = ab_draws_df.draw_0[ab_draws_df.draw_0.notnull()].index.values
+            
+            df_ab_nobs = nobs_df.copy(deep=True)
+            df_ab_nobs['age_6mos'] = (df_ab_nobs['interview_age'] // 6) * 6
+            
+            count_by_level = df_ab_nobs.groupby(strata+balance)[['subjectkey']].nunique().reset_index()
+            levels_counts = count_by_level[count_by_level.subjectkey >= ab_n_splits].groupby(balance)[strata].nunique().reset_index().rename(columns={'unique_scanner':'sufficient_sites'})
+            levels_counts.loc[levels_counts.sufficient_sites == levels_counts.sufficient_sites.max()]
+            df_ab_nobs = df_ab_nobs.reset_index().merge(levels_counts, how='left', on=['gender','ehi_ss_score', 'age_6mos']).set_index('index')
+            df_ab_nobs = df_ab_nobs.loc[df_ab_nobs.sufficient_sites == df_ab_nobs.sufficient_sites.max(),:]
+            ab_draws_df_nobs = bal_samp(df_ab_nobs, strata, balance, order, keys, n_splits=ab_n_splits, n_draws=n_draws)
+            ab_draw_ind_nobs = ab_draws_df_nobs.draw_0[ab_draws_df_nobs.draw_0.notnull()].index.values
 
-    # draw samples
-    strata = ['unique_scanner']
-    balance = ['gender', 'ehi_ss_score']
-    order = ['interview_age']
-    keys = ['subjectkey', 'interview_date']
-    n_splits = 3
-    ab_n_splits = 2
-    draws_df = bal_samp(raw_df, strata, balance, order, keys, n_splits=n_splits, n_draws=n_draws)
+            
+            run_params.extend([
+                      (df_ab.loc[ab_draw_ind, :],
+                      ymapper.transform(df_ab.loc[ab_draw_ind, :]).ravel(),
+                      df_ab_nobs.loc[ab_draw_ind_nobs, :],
+                      ymapper.transform(df_ab_nobs.loc[ab_draw_ind_nobs, :]).ravel(),
+                      pn, 0, name, metric_cols) for name in  ['ab_normal', 'ab_combat']])
+    else:
+        # set up perm
+        raw_df.loc[:, 'unique_scanner'] = raw_df.loc[perms[pn], 'unique_scanner'].values
 
-    strata = ['unique_scanner']
-    balance = ['gender', 'ehi_ss_score','age_3mos']
-    order = ['interview_age']
-    keys = ['subjectkey', 'interview_date']
-    df_ab = raw_df.copy(deep=True)
-    df_ab['age_3mos'] = (df_ab['interview_age'] // 3) * 3
+        # draw samples
+        strata = ['unique_scanner']
+        balance = ['gender', 'ehi_ss_score']
+        order = ['interview_age']
+        keys = ['subjectkey', 'interview_date']
+        n_splits = 3
+        ab_n_splits = 2
+        draws_df = bal_samp(raw_df, strata, balance, order, keys, n_splits=n_splits, n_draws=n_draws)
 
-    count_by_level = df_ab.groupby(strata+balance)[['subjectkey']].nunique().reset_index()
-    levels_counts = count_by_level[count_by_level.subjectkey >= ab_n_splits].groupby(balance)[strata].nunique().reset_index().rename(columns={'unique_scanner':'sufficient_sites'})
-    levels_counts.loc[levels_counts.sufficient_sites == levels_counts.sufficient_sites.max()]
-    df_ab = df_ab.reset_index().merge(levels_counts, how='left', on=['gender','ehi_ss_score', 'age_3mos']).set_index('index')
-    df_ab = df_ab.loc[df_ab.sufficient_sites == df_ab.sufficient_sites.max(),:]
-    ab_draws_df = bal_samp(df_ab, strata, balance, order, keys, n_splits=ab_n_splits, n_draws=n_draws)
+        # Create cv folds for gender age balance
+        cv_splits = get_splits(draws_df, n_draws=n_draws, dn=dn)
 
-    # Create cv folds for gender age balance
-    cv_splits = get_splits(draws_df, n_draws=n_draws, dn=dn)
-    
-    # Build run list
-    run_params = [
-    (raw_df.loc[cv[0], :],
-              ymapper.transform(raw_df.loc[cv[0], :]).ravel(),
-                raw_df.loc[cv[1], :],
-                ymapper.transform(raw_df.loc[cv[1], :]).ravel(),
-                pn, fn, name, metric_cols) for fn,cv in enumerate(cv_splits) for name in ['normal', 'age_rsd', 'cbagersd', 'combat']]
-    if do_ab:
-        # Prep data for age_balance
-        ab_cv_splits = get_splits(ab_draws_df, n_draws=n_draws, dn=dn)
-        run_params.extend([(raw_df.loc[cv[0], :],
-                        ymapper.transform(raw_df.loc[cv[0], :]).ravel(),
-                        raw_df.loc[cv[1], :],
-                        ymapper.transform(raw_df.loc[cv[1], :]).ravel(),
-                        pn, fn, name, metric_cols) for fn,cv in enumerate(ab_cv_splits) for name in ['ab_normal', 'ab_combat']])
-    
+        # Build run list
+        run_params = [
+        (raw_df.loc[cv[0], :],
+                  ymapper.transform(raw_df.loc[cv[0], :]).ravel(),
+                    raw_df.loc[cv[1], :],
+                    ymapper.transform(raw_df.loc[cv[1], :]).ravel(),
+                    pn, fn, name, metric_cols) for fn,cv in enumerate(cv_splits) for name in ['normal', 'age_rsd', 'cbagersd', 'combat']]
+        if do_ab:
+            strata = ['unique_scanner']
+            balance = ['gender', 'ehi_ss_score','age_6mos']
+            order = ['interview_age']
+            keys = ['subjectkey', 'interview_date']
+            df_ab = raw_df.copy(deep=True)
+            df_ab['age_6mos'] = (df_ab['interview_age'] // 6) * 6
+
+            count_by_level = df_ab.groupby(strata+balance)[['subjectkey']].nunique().reset_index()
+            levels_counts = count_by_level[count_by_level.subjectkey >= ab_n_splits].groupby(balance)[strata].nunique().reset_index().rename(columns={'unique_scanner':'sufficient_sites'})
+            levels_counts.loc[levels_counts.sufficient_sites == levels_counts.sufficient_sites.max()]
+            df_ab = df_ab.reset_index().merge(levels_counts, how='left', on=['gender','ehi_ss_score', 'age_6mos']).set_index('index')
+            df_ab = df_ab.loc[df_ab.sufficient_sites == df_ab.sufficient_sites.max(),:]
+            ab_draws_df = bal_samp(df_ab, strata, balance, order, keys, n_splits=ab_n_splits, n_draws=n_draws)
+
+            # Prep data for age_balance
+            ab_cv_splits = get_splits(ab_draws_df, n_draws=n_draws, dn=dn)
+            run_params.extend([(raw_df.loc[cv[0], :],
+                            ymapper.transform(raw_df.loc[cv[0], :]).ravel(),
+                            raw_df.loc[cv[1], :],
+                            ymapper.transform(raw_df.loc[cv[1], :]).ravel(),
+                            pn, fn, name, metric_cols) for fn,cv in enumerate(ab_cv_splits) for name in ['ab_normal', 'ab_combat']])
+
     print("Fitting %d models"%len(run_params), flush=True)
     res = joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(per_fold)(*params) for params in run_params)
     
     if (dn == 0) or (n_draws is not None):
         # Combat for Variance
-        combat_res = run_combat(raw_df.loc[:,metric_cols], raw_df.loc[:, ['interview_age', 'gender', 'ehi_ss_score', 'unique_scanner']])
-        cb_df = raw_df.copy(deep=True)
-        cb_df.loc[:, metric_cols] = combat_res[0].T
+        if bootstrap:
+            combat_res = run_combat(bs_df.loc[:,metric_cols], bs_df.loc[:, ['interview_age', 'gender', 'ehi_ss_score', 'unique_scanner']])
+            cb_df = bs_df.copy(deep=True)
+            cb_df.loc[:, metric_cols] = combat_res[0].T     
+        else:
+            combat_res = run_combat(raw_df.loc[:,metric_cols], raw_df.loc[:, ['interview_age', 'gender', 'ehi_ss_score', 'unique_scanner']])
+            cb_df = raw_df.copy(deep=True)
+            cb_df.loc[:, metric_cols] = combat_res[0].T
         try:
             cb_df.loc[:, list(metric_cols) + ['interview_age']] = variance_mapper.fit_transform(cb_df)
         except ValueError:
             cb_df.loc[:, list(metric_cols) + ['interview_age']] = variance_mapper.fit_transform(cb_df.fillna(cb_df.mean()))
         print("Estimate variance contributions for each metric after combat correction", flush=True)
-        cb_var_res = joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(run_variance_metric_perm)(pn, perms[pn], metric, cb_df) for metric in metric_cols)
+        if bootstrap:
+            cb_var_res = joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(run_variance_metric_perm)(pn, bs_df.index.values, metric, cb_df) for metric in metric_cols)
+        else:
+            cb_var_res = joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(run_variance_metric_perm)(pn, perms[pn], metric, cb_df) for metric in metric_cols)
     else:
         cb_var_res = None
     all_res = (res, var_res, cb_var_res)

@@ -526,7 +526,7 @@ def cg_reg(mdl):
     A = np.matmul(X.T, X)
     b = np.matmul(X.T, Y)
 
-    betas, rescode = cg(A,b)
+    betas, rescode = cg(A, b, tol=1e-9)
     
     rsquared = stats.pearsonr(np.matmul(X,betas), Y)[0]**2
     return betas, rsquared, rescode
@@ -534,6 +534,7 @@ def cg_reg(mdl):
     
 def run_variance_metric_perm(pn, perm, metric, df, include_models=False, residualize=False, cg=True):
     # Don't forget to z-score df before this step
+    df = df.copy()
     if perm is not None:
         df['perm_metric'] = df.copy().loc[perm, metric].values
     else:
@@ -598,6 +599,42 @@ def run_variance_metric_perm(pn, perm, metric, df, include_models=False, residua
 def run_variance_perm(pn, perm, df, metrics):
     return [run_variance_metric_perm(pn, perm, metric, df) for metric in metrics]
 
+def get_mod_res(fit):
+    sum2t = fit.summary2().tables
+    
+    stretched = []
+    for var, row in sum2t[1].iterrows():
+        for name,val in row.iteritems():
+            stretched.append({'param':var, 'var':name, 'val':val})
+    stretched = pd.DataFrame(stretched)
+
+    mod_res = (pd.concat([sum2t[0].loc[:,[0,1]],
+                          sum2t[0].loc[:,[2,3]].rename(columns={2:0,3:1}),
+                          sum2t[2].loc[:,[0,1]],
+                          sum2t[2].loc[:,[2,3]].rename(columns={2:0,3:1})])
+               .reset_index(drop=True)
+               .rename(columns={0:'var', 1:'val'}))
+    mod_res = pd.concat([mod_res, stretched], sort=False).reset_index(drop=True)
+    return mod_res
+
+def fit_agh_mod(df):
+    agh_mod = smf.ols('perm_metric ~ 1 + interview_age + gender', data = df)
+    agh_fit = agh_mod.fit()
+    return get_mod_res(agh_fit)
+
+def calc_sig(pn, perm, metric, df):
+    if perm is not None:
+        df['perm_metric'] = df.copy().loc[perm, metric].values
+    else:
+        df['perm_metric'] = df.copy().loc[:, metric].values
+    res = {}
+    me_mdl = smf.mixedlm('perm_metric ~ 1 + interview_age + gender', re_formula = '~1', groups='unique_scanner', data=df)
+    res['me_fit'] = me_mdl.fit()
+    res['ttest_all_res'] = stats.ttest_1samp(df.perm_metric, 0)
+    res['ttest_site_res'] = df.groupby('unique_scanner').perm_metric.apply(lambda x: stats.ttest_1samp(x, 0))
+    res['ols_all_fit'] = fit_agh_mod(df)
+    res['ols_site_fit'] = df.groupby('unique_scanner').apply(fit_agh_mod)
+    return res
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process some integers.')
@@ -674,7 +711,8 @@ if __name__ == "__main__":
                       'rsfmri_cor_network.gordon_mean.trans',
                       'rsfmri_cor_network.gordon_max.trans',
                       'rsfmri_cor_network.gordon_mean.rot',
-                      'rsfmri_cor_network.gordon_max.rot',]
+                      'rsfmri_cor_network.gordon_max.rot',
+                      'index', 'cr']
     meta_cols = raw_df.columns[raw_df.columns.isin(base_meta_cols)].values
     metric_cols = raw_df.columns[~raw_df.columns.isin(base_meta_cols)].values
     
@@ -691,13 +729,15 @@ if __name__ == "__main__":
               var_df = bs_df.copy(deep=True)
         else:
             var_df = raw_df.copy(deep=True)
-        var_df.loc[:, list(metric_cols) + ['interview_age']] = variance_mapper.fit_transform(raw_df)
+#         var_df.loc[:, list(metric_cols) + ['interview_age']] = variance_mapper.fit_transform(var_df)
 
         print("Estimate variance contributions for each metric", flush=True)
         if bootstrap:
             var_res = joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(run_variance_metric_perm)(pn, None, metric, var_df) for metric in metric_cols)
+            sig_res = joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(calc_sig)(pn, None, metric, var_df) for metric in metric_cols)
         else:
             var_res = joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(run_variance_metric_perm)(pn, perms[pn], metric, var_df) for metric in metric_cols)
+            sig_res = joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(calc_sig)(pn, perms[pn], metric, var_df) for metric in metric_cols)
     else:
         var_res = None
     if bootstrap:
@@ -810,20 +850,26 @@ if __name__ == "__main__":
             cb_df = bs_df.copy(deep=True)
             cb_df.loc[:, metric_cols] = combat_res[0].T     
         else:
-            combat_res = run_combat(raw_df.loc[:,metric_cols], raw_df.loc[:, ['interview_age', 'gender', 'unique_scanner']])
             cb_df = raw_df.copy(deep=True)
+            # for combat, since raw_df is already permed, also perm other predictors, leave metrics alone
+            predictors = ['interview_age', 
+                          'gender', 
+                          'mri_info_manufacturer', 
+                          'mri_info_manufacturersmn']
+            cb_df.loc[:, predictors] = cb_df.loc[perms[pn], predictors].values
+            combat_res = run_combat(cb_df.loc[:,metric_cols], cb_df.loc[:, ['interview_age', 'gender', 'unique_scanner']])
             cb_df.loc[:, metric_cols] = combat_res[0].T
-        try:
-            cb_df.loc[:, list(metric_cols) + ['interview_age']] = variance_mapper.fit_transform(cb_df)
-        except ValueError:
-            cb_df.loc[:, list(metric_cols) + ['interview_age']] = variance_mapper.fit_transform(cb_df.fillna(cb_df.mean()))
+            
+#         try:
+#             cb_df.loc[:, list(metric_cols) + ['interview_age']] = variance_mapper.fit_transform(cb_df)
+#         except ValueError:
+#             cb_df.loc[:, list(metric_cols) + ['interview_age']] = variance_mapper.fit_transform(cb_df.fillna(cb_df.mean()))
         print("Estimate variance contributions for each metric after combat correction", flush=True)
-        if bootstrap:
-            cb_var_res = joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(run_variance_metric_perm)(pn, None, metric, cb_df) for metric in metric_cols)
-        else:
-            cb_var_res = joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(run_variance_metric_perm)(pn, perms[pn], metric, cb_df) for metric in metric_cols)
+
+        cb_var_res = joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(run_variance_metric_perm)(pn, None, metric, cb_df) for metric in metric_cols)
+        cb_sig_res = joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(calc_sig)(pn, None, metric, cb_df) for metric in metric_cols)
     else:
         cb_var_res = None
-    all_res = (res, var_res, cb_var_res)
+    all_res = (res, var_res, cb_var_res, sig_res, cb_sig_res)
     with open(out_path, 'wb') as h:
         pickle.dump(all_res, h)

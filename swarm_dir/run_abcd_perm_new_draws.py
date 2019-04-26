@@ -600,20 +600,29 @@ def run_variance_perm(pn, perm, df, metrics):
     return [run_variance_metric_perm(pn, perm, metric, df) for metric in metrics]
 
 def get_mod_res(fit):
-    sum2t = fit.summary2().tables
+    try:
+        sum2t = fit.summary2().tables
+    except AttributeError:
+        sum2t = fit.summary().tables
     
     stretched = []
     for var, row in sum2t[1].iterrows():
         for name,val in row.iteritems():
             stretched.append({'param':var, 'var':name, 'val':val})
-    stretched = pd.DataFrame(stretched)
-
-    mod_res = (pd.concat([sum2t[0].loc[:,[0,1]],
-                          sum2t[0].loc[:,[2,3]].rename(columns={2:0,3:1}),
-                          sum2t[2].loc[:,[0,1]],
-                          sum2t[2].loc[:,[2,3]].rename(columns={2:0,3:1})])
-               .reset_index(drop=True)
-               .rename(columns={0:'var', 1:'val'}))
+    stretched = pd.DataFrame(stretched).reset_index(drop=True)
+    
+    try:
+        mod_res = (pd.concat([sum2t[0].loc[:,[0,1]],
+                              sum2t[0].loc[:,[2,3]].rename(columns={2:0,3:1}),
+                              sum2t[2].loc[:,[0,1]],
+                              sum2t[2].loc[:,[2,3]].rename(columns={2:0,3:1})])
+                   .reset_index(drop=True)
+                   .rename(columns={0:'var', 1:'val'})).reset_index(drop=True)
+    except IndexError:
+        mod_res = (pd.concat([sum2t[0].loc[:,[0,1]],
+                              sum2t[0].loc[:,[2,3]].rename(columns={2:0,3:1})])
+                   .reset_index(drop=True)
+                   .rename(columns={0:'var', 1:'val'})).reset_index(drop=True)
     mod_res = pd.concat([mod_res, stretched], sort=False).reset_index(drop=True)
     return mod_res
 
@@ -629,12 +638,67 @@ def calc_sig(pn, perm, metric, df):
         df['perm_metric'] = df.copy().loc[:, metric].values
     res = {}
     me_mdl = smf.mixedlm('perm_metric ~ 1 + interview_age + gender', re_formula = '~1', groups='unique_scanner', data=df)
-    res['me_fit'] = me_mdl.fit()
-    res['ttest_all_res'] = stats.ttest_1samp(df.perm_metric, 0)
-    res['ttest_site_res'] = df.groupby('unique_scanner').perm_metric.apply(lambda x: stats.ttest_1samp(x, 0))
+    me_fit = me_mdl.fit()
+    res['pn'] = pn
+    res['metric'] = metric
+    res['me_fit'] = get_mod_res(me_fit)
+    all_ttest = stats.ttest_1samp(df.perm_metric, 0)
+    ttest_res = [{'pn':pn,
+                  'metric': metric,
+                  'var': 't',
+                  'val': all_ttest.statistic,
+                  'unique_scanner': "all",
+                  'method':'ttest',
+                  'param': 'Intercept'},
+                {'pn':pn,
+                  'metric': metric,
+                  'var': 'P>|t|',
+                  'val': all_ttest.pvalue,
+                  'unique_scanner': "all",
+                  'method':'ttest',
+                  'param': 'Intercept'}]
+    site_ttest = df.groupby('unique_scanner').perm_metric.apply(lambda x: stats.ttest_1samp(x, 0))
+
+    for ii, tt in site_ttest.iteritems():
+        ttest_res.extend([{'pn':pn,
+                      'metric': metric,
+                      'var': 't',
+                      'val': tt.statistic,
+                      'unique_scanner': ii,
+                      'method':'ttest',
+                      'param': 'Intercept'},
+                    {'pn':pn,
+                      'metric': metric,
+                      'var': 'P>|t|',
+                      'val': tt.pvalue,
+                      'unique_scanner': ii,
+                      'method':'ttest',
+                      'param': 'Intercept'}])
+    ttest_res = pd.DataFrame(ttest_res)
+    res['ttest_res'] = ttest_res
     res['ols_all_fit'] = fit_agh_mod(df)
     res['ols_site_fit'] = df.groupby('unique_scanner').apply(fit_agh_mod)
     return res
+    
+def consolidate_sig_res(res):
+    ols_fits = []
+    for rr in res:
+        rr['me_fit']['pn'] = rr['pn']
+        rr['me_fit']['metric'] = rr['metric']
+        rr['me_fit']['unique_scanner'] = "all"
+        rr['me_fit']['method'] = 'me'
+
+        rr['ols_all_fit']['unique_scanner'] = "all"
+        rr['ols_all_fit']['method'] = 'ols'
+        rr['ols_site_fit'] = rr['ols_site_fit'].reset_index().drop(columns='level_1')
+        rr['ols_site_fit']['method'] = 'ols'
+
+        ols_df = pd.concat([rr['ols_all_fit'], rr['ols_site_fit'], rr['me_fit'], rr['ttest_res']], sort=False, ignore_index=True)
+        ols_df['pn'] = rr['pn']
+        ols_df['metric'] = rr['metric']
+        ols_fits.append(ols_df)
+    ols_fits = pd.concat(ols_fits, sort=False, ignore_index=True)
+    return ols_fits
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Process some integers.')
@@ -738,8 +802,11 @@ if __name__ == "__main__":
         else:
             var_res = joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(run_variance_metric_perm)(pn, perms[pn], metric, var_df) for metric in metric_cols)
             sig_res = joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(calc_sig)(pn, perms[pn], metric, var_df) for metric in metric_cols)
+        sig_res = consolidate_sig_res(sig_res)
+        sig_res['combat'] = False
     else:
         var_res = None
+        sig_res = None
     if bootstrap:
         # draw samples
         strata = ['unique_scanner']
@@ -868,8 +935,13 @@ if __name__ == "__main__":
 
         cb_var_res = joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(run_variance_metric_perm)(pn, None, metric, cb_df) for metric in metric_cols)
         cb_sig_res = joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(calc_sig)(pn, None, metric, cb_df) for metric in metric_cols)
+        cb_sig_res = consolidate_sig_res(cb_sig_res)
+        cb_sig_res['combat'] = True
+        sig_res = pd.concat([sig_res, cb_sig_res], sort=False, ignore_index=True)
     else:
         cb_var_res = None
-    all_res = (res, var_res, cb_var_res, sig_res, cb_sig_res)
+        cb_sig_res = None
+    all_res = (res, var_res, cb_var_res)
     with open(out_path, 'wb') as h:
         pickle.dump(all_res, h)
+    sig_res.to_pickle(out_path.replace('.pkz', '_sig.gz'))

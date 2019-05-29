@@ -32,302 +32,28 @@ class ResidTransform(BaseEstimator, TransformerMixin):
         return x - self.lm.predict(confound)
     
 
+def run_combat(feats, meta, model="~interview_age + gender", par_prior=False, par_fallback=True):
 
-
-def run_combat(feats, meta, model="~interview_age + gender",
-              feats_test=None, meta_test=None, model_test=None):
-    
     import rpy2.robjects as robjects
     import rpy2.robjects.numpy2ri
 
     rpy2.robjects.numpy2ri.activate()
     robjects.r('library(sva)')
     robjects.r('library(BiocParallel)')
-    robjects.r('''modifiedComBat <- function (dat, batch, mod = NULL, par.prior = FALSE, prior.plots = FALSE, 
-               mean.only = FALSE, ref.batch = NULL, BPPARAM = bpparam("SerialParam"), dat2 = NULL, batch2 = NULL, mod2 = NULL) 
-    {
-      if (mean.only == TRUE) {
-        message("Using the 'mean only' version of ComBat")
-      }
-      if (length(dim(batch)) > 1) {
-        stop("This version of ComBat only allows one batch variable")
-      }
-      if (is.null(batch2)) {
-        batch <- as.factor(batch)
-      }
-      else {
-        n1 <- length(batch)
-        allbatch <- as.factor(c(batch, batch2))
-        batch <- allbatch[1:n1]
-        batch2 <- allbatch[(n1 + 1):length(allbatch)]
-      }
-      batchmod <- model.matrix(~-1 + batch)
-      if (!is.null(dat2)) batchmod2 <- model.matrix(~-1 + batch2)
-      if (!is.null(ref.batch)) {
-        if (!(ref.batch %in% levels(batch))) {
-          stop("reference level ref.batch is not one of the levels of the batch variable")
-        }
-        cat("Using batch =", ref.batch, "as a reference batch (this batch won't change)\n")
-        ref <- which(levels(as.factor(batch)) == ref.batch)
-        batchmod[, ref] <- 1
-        if (!is.null(dat2)) {
-          ref2 <- which(levels(as.factor(batch2)) == ref.batch)
-          batchmod2[, ref2] <- 1
-        }
-      }
-      else {
-        ref <- NULL
-      }
-      message("Found", nlevels(batch), "batches")
-      n.batch <- nlevels(batch)
-      batches <- list()
-      for (i in 1:n.batch) {
-        batches[[i]] <- which(batch == levels(batch)[i])
-      }
-      if (!is.null(dat2)) {
-        batches2 <- list()
-        for (i in 1:n.batch) {
-          batches2[[i]] <- which(batch2 == levels(batch)[i])
-        }
-      }
-      n.batches <- sapply(batches, length)
-      if (any(n.batches == 1)) {
-        mean.only = TRUE
-        message("Note: one batch has only one sample, setting mean.only=TRUE")
-      }
-      n.array <- sum(n.batches)
-      design <- cbind(batchmod, mod)
-      check <- apply(design, 2, function(x) all(x == 1))
-      if (!is.null(ref)) {
-        check[ref] <- FALSE
-      }
-      design <- as.matrix(design[, !check])
-      if (!is.null(dat2)) {
-        n.batches2 <- sapply(batches2, length)
-        n.array2 <- sum(n.batches2)
-        design2 <- cbind(batchmod2, mod2)
-        check2 <- apply(design2, 2, function(x) all(x == 1))
-        if (!is.null(ref)) {
-          check2[ref] <- FALSE
-        } 
-        design2 <- as.matrix(design2[, !check2])
-      }
-      message("Adjusting for", ncol(design) - ncol(batchmod), "covariate(s) or covariate level(s)")
-      if (qr(design)$rank < ncol(design)) {
-        if (ncol(design) == (n.batch + 1)) {
-          stop("The covariate is confounded with batch! Remove the covariate and rerun ComBat")
-        }
-        if (ncol(design) > (n.batch + 1)) {
-          if ((qr(design[, -c(1:n.batch)])$rank < ncol(design[, 
-                                                              -c(1:n.batch)]))) {
-            stop("The covariates are confounded! Please remove one or more of the covariates so the design is not confounded")
-          }
-          else {
-            stop("At least one covariate is confounded with batch! Please remove confounded covariates and rerun ComBat")
-          }
-        }
-      }
-      NAs <- any(is.na(dat))
-      if (NAs) {
-        message(c("Found", sum(is.na(dat)), "Missing Data Values"), 
-                sep = " ")
-      }
-      cat("Standardizing Data across genes\n")
-
-      if (!NAs) {
-        B.hat <- solve(crossprod(design), tcrossprod(t(design), 
-                                                     as.matrix(dat)))
-      }
-        else {
-          B.hat <- apply(dat, 1, Beta.NA, design)
-        }
-      if (!is.null(ref.batch)) {
-        grand.mean <- t(B.hat[ref, ])
-      }
-        else {
-          grand.mean <- crossprod(n.batches/n.array, B.hat[1:n.batch, 
-                                                           ])
-        }
-      if (!NAs) {
-        if (!is.null(ref.batch)) {
-          ref.dat <- dat[, batches[[ref]]]
-          var.pooled <- ((ref.dat - t(design[batches[[ref]], 
-                                             ] %*% B.hat))^2) %*% rep(1/n.batches[ref], n.batches[ref])
-        }
-        else {
-          var.pooled <- ((dat - t(design %*% B.hat))^2) %*% 
-            rep(1/n.array, n.array)
-        }
-      }
-        else {
-          if (!is.null(ref.batch)) {
-            ref.dat <- dat[, batches[[ref]]]
-            var.pooled <- rowVars(ref.dat - t(design[batches[[ref]], 
-                                                     ] %*% B.hat), na.rm = TRUE)
-          }
-          else {
-            var.pooled <- rowVars(dat - t(design %*% B.hat), 
-                                  na.rm = TRUE)
-          }
-        }
-      stand.mean <- t(grand.mean) %*% t(rep(1, n.array))
-      if (!is.null(dat2)) stand.mean2 <- t(grand.mean) %*% t(rep(1, n.array2))
-      if (!is.null(design)) {
-        tmp <- design
-        tmp[, c(1:n.batch)] <- 0
-        stand.mean <- stand.mean + t(tmp %*% B.hat)
-        if (!is.null(dat2)) {
-          tmp2 <- design2
-          tmp2[, c(1:n.batch)] <- 0
-          stand.mean2 <- stand.mean2 + t(tmp2 %*% B.hat)
-        }
-      }
-      s.data <- (dat - stand.mean)/(sqrt(var.pooled) %*% t(rep(1, 
-                                                               n.array)))
-      if (!is.null(dat2)) {
-        s.data2 <- (dat2 - stand.mean2)/(sqrt(var.pooled) %*% t(rep(1, 
-                                                                 n.array2)))
-      }
-      message("Fitting L/S model and finding priors")
-      batch.design <- design[, 1:n.batch]
-      if (!is.null(dat2)) batch.design2 <- design2[, 1:n.batch]
-      if (!NAs) {
-        gamma.hat <- solve(crossprod(batch.design), tcrossprod(t(batch.design), 
-                                                               as.matrix(s.data)))
-      }
-        else {
-          gamma.hat <- apply(s.data, 1, Beta.NA, batch.design)
-        }
-      delta.hat <- NULL
-      for (i in batches) {
-        if (mean.only == TRUE) {
-          delta.hat <- rbind(delta.hat, rep(1, nrow(s.data)))
-        }
-        else {
-          delta.hat <- rbind(delta.hat, rowVars(s.data[, i], 
-                                                na.rm = TRUE))
-        }
-      }
-      gamma.bar <- rowMeans(gamma.hat)
-      t2 <- rowVars(gamma.hat)
-      a.prior <- apply(delta.hat, 1, sva:::aprior)
-      b.prior <- apply(delta.hat, 1, sva:::bprior)
-      if (prior.plots && par.prior) {
-        par(mfrow = c(2, 2))
-        tmp <- density(gamma.hat[1, ])
-        plot(tmp, type = "l", main = expression(paste("Density Plot of First Batch ", 
-                                                      hat(gamma))))
-        xx <- seq(min(tmp$x), max(tmp$x), length = 100)
-        lines(xx, dnorm(xx, gamma.bar[1], sqrt(t2[1])), col = 2)
-        qqnorm(gamma.hat[1, ], main = expression(paste("Normal Q-Q Plot of First Batch ", 
-                                                       hat(gamma))))
-        qqline(gamma.hat[1, ], col = 2)
-        tmp <- density(delta.hat[1, ])
-        xx <- seq(min(tmp$x), max(tmp$x), length = 100)
-        tmp1 <- list(x = xx, y = sva:::dinvgamma(xx, a.prior[1], b.prior[1]))
-        plot(tmp, typ = "l", ylim = c(0, max(tmp$y, tmp1$y)), 
-             main = expression(paste("Density Plot of First Batch ", 
-                                     hat(delta))))
-        lines(tmp1, col = 2)
-        invgam <- 1/qgamma(1 - ppoints(ncol(delta.hat)), a.prior[1], 
-                           b.prior[1])
-        qqplot(invgam, delta.hat[1, ], main = expression(paste("Inverse Gamma Q-Q Plot of First Batch ", 
-                                                               hat(delta))), ylab = "Sample Quantiles", xlab = "Theoretical Quantiles")
-        lines(c(0, max(invgam)), c(0, max(invgam)), col = 2)
-      }
-      gamma.star <- delta.star <- matrix(NA, nrow = n.batch, ncol = nrow(s.data))
-      if (par.prior) {
-        message("Finding parametric adjustments")
-        results <- BiocParallel:::bplapply(1:n.batch, function(i) {
-          if (mean.only) {
-            gamma.star <- postmean(gamma.hat[i, ], gamma.bar[i], 
-                                   1, 1, t2[i])
-            delta.star <- rep(1, nrow(s.data))
-          }
-          else {
-            temp <- sva:::it.sol(s.data[, batches[[i]]], gamma.hat[i, 
-                                                                   ], delta.hat[i, ], gamma.bar[i], t2[i], a.prior[i], 
-                                 b.prior[i])
-            gamma.star <- temp[1, ]
-            delta.star <- temp[2, ]
-          }
-          list(gamma.star = gamma.star, delta.star = delta.star)
-        }, BPPARAM = BPPARAM)
-        for (i in 1:n.batch) {
-          gamma.star[i, ] <- results[[i]]$gamma.star
-          delta.star[i, ] <- results[[i]]$delta.star
-        }
-      }
-        else {
-          message("Finding nonparametric adjustments")
-          results <- BiocParallel:::bplapply(1:n.batch, function(i) {
-            if (mean.only) {
-              delta.hat[i, ] = 1
-            }
-            temp <- sva:::int.eprior(as.matrix(s.data[, batches[[i]]]), 
-                               gamma.hat[i, ], delta.hat[i, ])
-            list(gamma.star = temp[1, ], delta.star = temp[2, 
-                                                           ])
-          }, BPPARAM = BPPARAM)
-          for (i in 1:n.batch) {
-            gamma.star[i, ] <- results[[i]]$gamma.star
-            delta.star[i, ] <- results[[i]]$delta.star
-          }
-        }
-      if (!is.null(ref.batch)) {
-        gamma.star[ref, ] <- 0
-        delta.star[ref, ] <- 1
-      }
-      message("Adjusting the Data\n")
-      bayesdata <- s.data
-      j <- 1
-      for (i in batches) {
-        bayesdata[, i] <- (bayesdata[, i] - t(batch.design[i, 
-                                                           ] %*% gamma.star))/(sqrt(delta.star[j, ]) %*% t(rep(1, 
-                                                                                                               n.batches[j])))
-        j <- j + 1
-      }
-      bayesdata <- (bayesdata * (sqrt(var.pooled) %*% t(rep(1, 
-                                                            n.array)))) + stand.mean
-      if (!is.null(ref.batch)) {
-        bayesdata[, batches[[ref]]] <- dat[, batches[[ref]]]
-      }
-      if (!is.null(dat2)) {
-        bayesdata2 <- s.data2
-        j <- 1
-        for (i in batches2) {
-          bayesdata2[, i] <- (bayesdata2[, i] - t(batch.design2[i, 
-                                                             ] %*% gamma.star))/(sqrt(delta.star[j, ]) %*% t(rep(1, 
-                                                                                                                 n.batches2[j])))
-          j <- j + 1
-        }
-        bayesdata2 <- (bayesdata2 * (sqrt(var.pooled) %*% t(rep(1, 
-                                                              n.array2)))) + stand.mean2
-        if (!is.null(ref.batch)) {
-          bayesdata2[, batches2[[ref]]] <- dat2[, batches2[[ref]]]
-        }
-        return(list(corrected = bayesdata, alpha = grand.mean, beta.hat = B.hat, gamma.star = gamma.star, delta.star = delta.star,
-                    corrected2 = bayesdata2))
-      }
-      return(list(corrected = bayesdata, alpha = grand.mean, beta.hat = B.hat, gamma.star = gamma.star, delta.star = delta.star))
-    }
-    ''')
-    combat = robjects.r('modifiedComBat')
+    combat = robjects.r('ComBat')
     model_matrix = patsy.dmatrix(model, meta)
     fmat = np.array(feats).T
     rbatch = robjects.IntVector(pd.Categorical(meta.unique_scanner).codes)
-    
-    if (meta_test is not None) and (feats_test is not None):
-        if model_test is None:
-            model_test = model
-        model_matrix_test = patsy.dmatrix(model_test, meta_test)
-        fmat_test = np.array(feats_test).T
-        rbatch_test = robjects.IntVector(pd.Categorical(meta_test.unique_scanner).codes)
-        combat_result = combat(dat=fmat, batch=rbatch, mod=model_matrix,
-                               dat2=fmat_test, batch2=rbatch_test, mod2=model_matrix_test)
-    else:
-        combat_result = combat(dat = fmat, batch = rbatch, mod = model_matrix)
-    combat_result = [np.array(cr) for cr in combat_result]
+    combat_result = combat(dat = fmat, batch = rbatch, mod = model_matrix, par_prior=par_prior)
+    combat_result = np.array(combat_result)
+    if par_fallback & ~par_prior & (pd.isnull(combat_result).sum() > 0):
+        print("Nonparametric prior failed, falling back to parametric.", flush=True)
+        combat_result = combat(dat = fmat, batch = rbatch, mod = model_matrix, par_prior=True)
+        combat_result = np.array(combat_result)
+        
+    if pd.isnull(combat_result).sum() > 0:
+        raise ValueError("ComBat has returned nans")
+        
     return combat_result
 
 
@@ -493,9 +219,9 @@ def per_fold(X_r, Y_r, X_e, Y_e, pn, fn, name, metric_cols):
         X_e_cb = X_e_rsd
         # Fit combat seperately on training and test splits
         combat_res_r = run_combat(X_r_cb.loc[:, metric_cols], X_r_cb.loc[:, cb_meta_cols])
-        X_r_cb.loc[:, metric_cols] = combat_res_r[0].T
+        X_r_cb.loc[:, metric_cols] = combat_res_r.T
         combat_res_e = run_combat(X_e_cb.loc[:, metric_cols], X_e_cb.loc[:, cb_meta_cols])
-        X_e_cb.loc[:, metric_cols] = combat_res_e[0].T
+        X_e_cb.loc[:, metric_cols] = combat_res_e.T
         return fit_model(X_r_cb, Y_r, X_e_cb, Y_e, pn, fn, name, mapper)
     
     # Learn combat on training, apply to test, fit on x_r_cb, score on x_e_cb
@@ -505,9 +231,9 @@ def per_fold(X_r, Y_r, X_e, Y_e, pn, fn, name, metric_cols):
         X_r_cb = X_r.copy(deep=True)
         X_e_cb = X_e.copy(deep=True)
         combat_res_r = run_combat(X_r_cb.loc[:, metric_cols], X_r_cb.loc[:, cb_meta_cols])
-        X_r_cb.loc[:, metric_cols] = combat_res_r[0].T
+        X_r_cb.loc[:, metric_cols] = combat_res_r.T
         combat_res_e = run_combat(X_e_cb.loc[:, metric_cols], X_e_cb.loc[:, cb_meta_cols])
-        X_e_cb.loc[:, metric_cols] = combat_res_e[0].T
+        X_e_cb.loc[:, metric_cols] = combat_res_e.T
         return (fit_model(X_r_cb, Y_r, X_e_cb, Y_e, pn, fn, name, mapper))
 
     
@@ -915,7 +641,7 @@ if __name__ == "__main__":
         if bootstrap:
             combat_res = run_combat(bs_df.loc[:,metric_cols], bs_df.loc[:, ['interview_age', 'gender', 'unique_scanner']])
             cb_df = bs_df.copy(deep=True)
-            cb_df.loc[:, metric_cols] = combat_res[0].T     
+            cb_df.loc[:, metric_cols] = combat_res.T     
         else:
             cb_df = raw_df.copy(deep=True)
             # for combat, since raw_df is already permed, also perm other predictors, leave metrics alone
@@ -925,7 +651,7 @@ if __name__ == "__main__":
                           'mri_info_manufacturersmn']
             cb_df.loc[:, predictors] = cb_df.loc[perms[pn], predictors].values
             combat_res = run_combat(cb_df.loc[:,metric_cols], cb_df.loc[:, ['interview_age', 'gender', 'unique_scanner']])
-            cb_df.loc[:, metric_cols] = combat_res[0].T
+            cb_df.loc[:, metric_cols] = combat_res.T
             
 #         try:
 #             cb_df.loc[:, list(metric_cols) + ['interview_age']] = variance_mapper.fit_transform(cb_df)
